@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and functional smoke tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      - name: Configure with CMake
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify binary was produced
+        run: |
+          test -x build/Os1_shell || { echo "shell binary missing"; exit 1; }
+          echo "Shell binary built."
+
+      - name: Built-in command - pwd reports the working directory
+        run: |
+          OUT=$(printf 'pwd\nquit\n' | timeout 10 ./build/Os1_shell)
+          echo "$OUT"
+          echo "$OUT" | grep -q "$(pwd)" || {
+            echo "pwd did not report the current working directory"; exit 1; }
+
+      - name: Built-in command - showpid reports a process id
+        run: |
+          OUT=$(printf 'showpid\nquit\n' | timeout 10 ./build/Os1_shell)
+          echo "$OUT"
+          echo "$OUT" | grep -qE 'pid is [0-9]+' || {
+            echo "showpid did not report a numeric pid"; exit 1; }
+
+      - name: Built-in command - cd changes the working directory
+        run: |
+          OUT=$(printf 'cd /tmp\npwd\nquit\n' | timeout 10 ./build/Os1_shell)
+          echo "$OUT"
+          echo "$OUT" | grep -q '/tmp' || {
+            echo "cd did not change the working directory"; exit 1; }
+
+      - name: External command execution via fork and exec
+        run: |
+          mkdir -p /tmp/smash_exec_test
+          touch /tmp/smash_exec_test/sentinel_file
+          OUT=$(printf 'cd /tmp/smash_exec_test\nls\nquit\n' | timeout 10 ./build/Os1_shell)
+          echo "$OUT"
+          echo "$OUT" | grep -q 'sentinel_file' || {
+            echo "external command did not execute"; exit 1; }
+
+      - name: Shell exits cleanly on quit
+        run: |
+          printf 'quit\n' | timeout 10 ./build/Os1_shell
+          echo "Shell exited with status $?"
